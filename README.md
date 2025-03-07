@@ -40,16 +40,6 @@ This function matches **Buy** and **Sell** orders based on the following criteri
 - Uses **atomic pointers** for safe concurrent modifications.
 - Uses **multiple threads** to simulate real-world stock trading.
 
-## How to Run
-1. Compile the C++ program using a compiler such as `g++`.
-   ```sh
-   g++ stock_trading.cpp -o stock_trading -pthread
-   ```
-2. Run the compiled executable:
-   ```sh
-   ./stock_trading
-   ```
-
 ## Expected Output
 - The program will generate random **Buy** and **Sell** orders.
 - Matched orders will be displayed in the format:
@@ -58,11 +48,6 @@ This function matches **Buy** and **Sell** orders based on the following criteri
   Matched: Sell Order (Ticker 76) at Price: 300
   ```
 
-## Future Enhancements
-- Implement **priority queues** for faster order matching.
-- Add **support for partial order execution**.
-- Extend to handle **market vs. limit orders**.
 
----
 
 
