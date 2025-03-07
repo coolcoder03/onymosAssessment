@@ -1,105 +1,116 @@
-class StockTradingEngine:
-    def __init__(self, max_tickers=1024):
-        """
-        Initialize the trading engine with support for up to `max_tickers` tickers.
-        Each ticker is assigned an index from 0 to max_tickers-1.
-        """
-        self.max_tickers = max_tickers
-        self.buy_orders = [[] for _ in range(max_tickers)]  # List of buy orders for each ticker
-        self.sell_orders = [[] for _ in range(max_tickers)]  # List of sell orders for each ticker
+#include <iostream>
+#include <vector>
+#include <atomic>
+#include <thread>
+#include <random>
 
-    def addOrder(self, order_type, ticker_index, quantity, price):
-        """
-        Add an order to the trading engine and attempt to match it with existing orders.
+using namespace std;
 
-        :param order_type: 'Buy' or 'Sell'
-        :param ticker_index: Index of the stock ticker (0 to max_tickers-1)
-        :param quantity: Number of shares
-        :param price: Price per share
-        """
-        if not (0 <= ticker_index < self.max_tickers):
-            raise ValueError("Invalid ticker index. Must be between 0 and max_tickers-1.")
+// Order structure
+// Represents a Buy or Sell order in the stock order book
+struct Order {
+    atomic<bool> active; // Tracks whether the order is active (lock-free approach)
+    char type; // 'B' for Buy, 'S' for Sell
+    int ticker; // Ticker symbol represented as an integer
+    int quantity; // Quantity of stocks in the order
+    int price; // Price of the order
+    Order* next; // Pointer to the next order in the linked list
 
-        print(f"New Order: {order_type} {quantity} shares of TICKER{ticker_index} at ${price}")
+    Order(char t, int tk, int q, int p) : type(t), ticker(tk), quantity(q), price(p), next(nullptr) {
+        active.store(true); // Mark order as active when created
+    }
+};
 
-        if order_type == "Buy":
-            self._process_buy_order(ticker_index, quantity, price)
-        elif order_type == "Sell":
-            self._process_sell_order(ticker_index, quantity, price)
-        else:
-            raise ValueError("Invalid order type. Must be 'Buy' or 'Sell'.")
+// Order book using a lock-free linked list
+class OrderBook {
+    atomic<Order*> head; // Atomic pointer to the head of the linked list
 
-    def _process_buy_order(self, ticker_index, quantity, price):
-        sell_orders = self.sell_orders[ticker_index]
+public:
+    OrderBook() { head.store(nullptr); }
+    
+    // Adds a new order (Buy or Sell) to the order book
+    // Time Complexity: O(1) - Inserts at the head of the linked list
+    void addOrder(char type, int ticker, int quantity, int price) {
+        Order* newOrder = new Order(type, ticker, quantity, price);
+        Order* oldHead;
+        do {
+            oldHead = head.load();
+            newOrder->next = oldHead;
+        } while (!head.compare_exchange_weak(oldHead, newOrder)); // Lock-free insertion
+    }
 
-        # Attempt to match buy order with sell orders
-        i = 0
-        while i < len(sell_orders) and quantity > 0:
-            sell_price, sell_quantity = sell_orders[i]
+    // Matches buy and sell orders based on price criteria
+    // Time Complexity: O(n) - Scans the order book for matches
+    // Space Complexity: O(n) - Orders are stored in a linked list
+    void matchOrder() {
+        Order* prev = nullptr;
+        Order* curr = head.load();
+        while (curr) {
+            if (!curr->active.load()) { // Skip inactive orders
+                prev = curr;
+                curr = curr->next;
+                continue;
+            }
+            Order* temp = head.load();
+            Order* bestMatch = nullptr;
+            Order* bestMatchPrev = nullptr;
 
-            if sell_price <= price:  # Match condition
-                matched_quantity = min(quantity, sell_quantity)
-                print(f"Trade Executed: {matched_quantity} shares of TICKER{ticker_index} at ${sell_price}")
-                quantity -= matched_quantity
+            // Find the best matching order (either lowest sell price or highest buy price)
+            while (temp) {
+                if (temp != curr && temp->active.load() && temp->ticker == curr->ticker &&
+                    ((curr->type == 'B' && temp->type == 'S' && curr->price >= temp->price) ||
+                     (curr->type == 'S' && temp->type == 'B' && temp->price >= curr->price))) {
+                    if (!bestMatch || (curr->type == 'B' ? temp->price < bestMatch->price : temp->price > bestMatch->price)) {
+                        bestMatch = temp;
+                        bestMatchPrev = prev;
+                    }
+                }
+                prev = temp;
+                temp = temp->next;
+            }
+            // If a match is found, deactivate both orders
+            if (bestMatch) {
+                bestMatch->active.store(false);
+                curr->active.store(false);
+                cout << "Matched: " << (curr->type == 'B' ? "Buy" : "Sell") << " Order (" << curr->ticker << ") at Price: " << bestMatch->price << "\n";
+            }
+            prev = curr;
+            curr = curr->next;
+        }
+    }
+};
 
-                # Update or remove the matched sell order
-                if sell_quantity > matched_quantity:
-                    sell_orders[i] = (sell_price, sell_quantity - matched_quantity)
-                    i += 1
-                else:
-                    sell_orders.pop(i)  # Remove fully matched order
-            else:
-                i += 1
+// Simulating stock transactions (Wrapper Function)
+// Randomly generates Buy and Sell orders to test the order book
+// Runs in multiple threads to simulate concurrent trading
+void simulateTrading(OrderBook &orderBook) {
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_int_distribution<> typeDist(0, 1);
+    uniform_int_distribution<> tickerDist(0, 1023);
+    uniform_int_distribution<> quantityDist(1, 100);
+    uniform_int_distribution<> priceDist(10, 500);
 
-        # If there is remaining buy quantity, add it to the buy orders list
-        if quantity > 0:
-            self.buy_orders[ticker_index].append((price, quantity))
-            self.buy_orders[ticker_index].sort(reverse=True)  # Sort by price descending
+    for (int i = 0; i < 100; i++) {
+        char type = typeDist(gen) == 0 ? 'B' : 'S';
+        int ticker = tickerDist(gen);
+        int quantity = quantityDist(gen);
+        int price = priceDist(gen);
+        orderBook.addOrder(type, ticker, quantity, price);
+    }
+}
 
-    def _process_sell_order(self, ticker_index, quantity, price):
-        buy_orders = self.buy_orders[ticker_index]
+int main() {
+    OrderBook orderBook;
+    
+    // Run stock transaction simulation in multiple threads
+    thread t1(simulateTrading, ref(orderBook));
+    thread t2(simulateTrading, ref(orderBook));
 
-        # Attempt to match sell order with buy orders
-        i = 0
-        while i < len(buy_orders) and quantity > 0:
-            buy_price, buy_quantity = buy_orders[i]
+    t1.join();
+    t2.join();
 
-            if buy_price >= price:  # Match condition
-                matched_quantity = min(quantity, buy_quantity)
-                print(f"Trade Executed: {matched_quantity} shares of TICKER{ticker_index} at ${price}")
-                quantity -= matched_quantity
-
-                # Update or remove the matched buy order
-                if buy_quantity > matched_quantity:
-                    buy_orders[i] = (buy_price, buy_quantity - matched_quantity)
-                    i += 1
-                else:
-                    buy_orders.pop(i)  # Remove fully matched order
-            else:
-                i += 1
-
-        # If there is remaining sell quantity, add it to the sell orders list
-        if quantity > 0:
-            self.sell_orders[ticker_index].append((price, quantity))
-            self.sell_orders[ticker_index].sort()  # Sort by price ascending
-
-
-# Wrapper function to simulate active stock transactions
-def simulate_stock_transactions(engine):
-    max_tickers = engine.max_tickers
-
-    for _ in range(100):  # Simulate 100 random transactions
-        order_type = "Buy" if random.randint(0, 1) == 0 else "Sell"
-        ticker_index = random.randint(0, max_tickers - 1)
-        quantity = random.randint(1, 100)  # Random quantity between 1 and 100 shares
-        price = round(random.uniform(10.0, 500.0), 2)  # Random price between $10 and $500
-
-        engine.addOrder(order_type, ticker_index, quantity, price)
-
-
-# Main execution
-if __name__ == "__main__":
-    import random
-
-    trading_engine = StockTradingEngine()
-    simulate_stock_transactions(trading_engine)
+    // Match orders after transactions
+    orderBook.matchOrder();
+    return 0;
+}
