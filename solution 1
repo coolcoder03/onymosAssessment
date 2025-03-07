@@ -1,0 +1,105 @@
+class StockTradingEngine:
+    def __init__(self, max_tickers=1024):
+        """
+        Initialize the trading engine with support for up to `max_tickers` tickers.
+        Each ticker is assigned an index from 0 to max_tickers-1.
+        """
+        self.max_tickers = max_tickers
+        self.buy_orders = [[] for _ in range(max_tickers)]  # List of buy orders for each ticker
+        self.sell_orders = [[] for _ in range(max_tickers)]  # List of sell orders for each ticker
+
+    def addOrder(self, order_type, ticker_index, quantity, price):
+        """
+        Add an order to the trading engine and attempt to match it with existing orders.
+
+        :param order_type: 'Buy' or 'Sell'
+        :param ticker_index: Index of the stock ticker (0 to max_tickers-1)
+        :param quantity: Number of shares
+        :param price: Price per share
+        """
+        if not (0 <= ticker_index < self.max_tickers):
+            raise ValueError("Invalid ticker index. Must be between 0 and max_tickers-1.")
+
+        print(f"New Order: {order_type} {quantity} shares of TICKER{ticker_index} at ${price}")
+
+        if order_type == "Buy":
+            self._process_buy_order(ticker_index, quantity, price)
+        elif order_type == "Sell":
+            self._process_sell_order(ticker_index, quantity, price)
+        else:
+            raise ValueError("Invalid order type. Must be 'Buy' or 'Sell'.")
+
+    def _process_buy_order(self, ticker_index, quantity, price):
+        sell_orders = self.sell_orders[ticker_index]
+
+        # Attempt to match buy order with sell orders
+        i = 0
+        while i < len(sell_orders) and quantity > 0:
+            sell_price, sell_quantity = sell_orders[i]
+
+            if sell_price <= price:  # Match condition
+                matched_quantity = min(quantity, sell_quantity)
+                print(f"Trade Executed: {matched_quantity} shares of TICKER{ticker_index} at ${sell_price}")
+                quantity -= matched_quantity
+
+                # Update or remove the matched sell order
+                if sell_quantity > matched_quantity:
+                    sell_orders[i] = (sell_price, sell_quantity - matched_quantity)
+                    i += 1
+                else:
+                    sell_orders.pop(i)  # Remove fully matched order
+            else:
+                i += 1
+
+        # If there is remaining buy quantity, add it to the buy orders list
+        if quantity > 0:
+            self.buy_orders[ticker_index].append((price, quantity))
+            self.buy_orders[ticker_index].sort(reverse=True)  # Sort by price descending
+
+    def _process_sell_order(self, ticker_index, quantity, price):
+        buy_orders = self.buy_orders[ticker_index]
+
+        # Attempt to match sell order with buy orders
+        i = 0
+        while i < len(buy_orders) and quantity > 0:
+            buy_price, buy_quantity = buy_orders[i]
+
+            if buy_price >= price:  # Match condition
+                matched_quantity = min(quantity, buy_quantity)
+                print(f"Trade Executed: {matched_quantity} shares of TICKER{ticker_index} at ${price}")
+                quantity -= matched_quantity
+
+                # Update or remove the matched buy order
+                if buy_quantity > matched_quantity:
+                    buy_orders[i] = (buy_price, buy_quantity - matched_quantity)
+                    i += 1
+                else:
+                    buy_orders.pop(i)  # Remove fully matched order
+            else:
+                i += 1
+
+        # If there is remaining sell quantity, add it to the sell orders list
+        if quantity > 0:
+            self.sell_orders[ticker_index].append((price, quantity))
+            self.sell_orders[ticker_index].sort()  # Sort by price ascending
+
+
+# Wrapper function to simulate active stock transactions
+def simulate_stock_transactions(engine):
+    max_tickers = engine.max_tickers
+
+    for _ in range(100):  # Simulate 100 random transactions
+        order_type = "Buy" if random.randint(0, 1) == 0 else "Sell"
+        ticker_index = random.randint(0, max_tickers - 1)
+        quantity = random.randint(1, 100)  # Random quantity between 1 and 100 shares
+        price = round(random.uniform(10.0, 500.0), 2)  # Random price between $10 and $500
+
+        engine.addOrder(order_type, ticker_index, quantity, price)
+
+
+# Main execution
+if __name__ == "__main__":
+    import random
+
+    trading_engine = StockTradingEngine()
+    simulate_stock_transactions(trading_engine)
